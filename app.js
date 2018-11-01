@@ -1,13 +1,14 @@
 
+
 /**
 
 Mighty Gumball, Inc.
-Version 5.0
+Version 4.0
 
-- Refactored Previous REST Client Approach to Transaction Based REST API
-- (i.e. instead of the Scaffolded REST API based on Domain Object Annotation)
+- Removed REST Client Approach to Data Access
+- Using MongoDB with Async Framework for Data Management
 - Handlebars Page Templates
-- Client State Validation using HMAC Key-Based Hash
+- Client State Validation using HMAC Key-Based Hash 
 
 NodeJS-Enabled Standing Gumball
 Model# M102988
@@ -15,8 +16,9 @@ Serial# 1234998871109
 
 **/
 
-var machine = "http://192.168.99.100:8000/goapi/gumball?apikey=4a91fc1be2fe40379d2d64aff70c77c2";
-var endpoint = "http://192.168.99.100:8000/goapi/order?apikey=4a91fc1be2fe40379d2d64aff70c77c2";
+
+// added in v4: mongodb, async
+// http://mongodb.github.io/node-mongodb-native/contents.html
 
 // added in v3: handlebars
 // https://www.npmjs.org/package/express3-handlebars
@@ -39,8 +41,66 @@ hbs = handlebars.create();
 app.engine('handlebars', hbs.engine);
 app.set('view engine', 'handlebars');
 
+var DB = require('mongodb').Db,
+    DB_Connection = require('mongodb').Connection,
+    DB_Server = require('mongodb').Server,
+    async = require('async') ;
 
-var secretKey = "4a91fc1be2fe40379d2d64aff70c77c2" ;
+/*
+var db_host = "ds043220.mongolab.com" ;
+var db_port = "43220" ;
+var db_user = "user" ;
+var db_pwd  = "pwd" ;
+var db_name = "db" ;
+*/
+
+
+var db_host = "localhost" ;
+var db_port = "27017" ;
+var db_user = "cmpe281" ;
+var db_pwd  = "cmpe281" ;
+var db_name = "test" ;
+
+   
+
+var db = new DB(db_name,
+                new DB_Server( db_host, db_port,
+                            { auto_reconnect: true,
+                             poolSize: 20}),
+                            { w: 1 } );
+
+db_init = function (callback) {
+    async.waterfall([
+        // 1. open database 
+        function (cb) {
+            console.log("INIT: STEP 1. Open MongoDB...");
+            db.open(cb);
+        },
+        // 2. authenticate       
+        function (result, cb) {
+            console.log("INIT: STEP 2. Authenticate...");
+            db.authenticate(db_user, db_pwd, function(err, res) {
+                        if(!err) {
+                            console.log("Authenticated");
+                            cb(null, callback) ;
+                        } else {
+                            console.log("Error in authentication.");
+                            console.log(err);
+                            process.exit(-1);
+                        }
+                    });
+        },
+        // 3. fetch collections
+        function (result, cb) {
+            console.log("INIT: STEP 3. Fetch Collections...");
+            db.collections(cb);
+        },
+
+    ], callback);
+};
+
+
+var secretKey = "kwRg54x2Go9iEdl49jFENRM12Mp711QI" ;
 
 var get_hash = function( state, ts ) {
 
@@ -78,65 +138,72 @@ var error = function( req, res, msg, ts ) {
 }
 
 
-var page = function( req, res, state, ts, status ) {
+var page = function( req, res, state, ts ) {
+  
+    db.collection('gumball', function(err, collection) {
+        collection.find( {serialNumber: '1234998871109'}).toArray( function(err, results) {
 
-    var result = new Object() ;
-    hash = get_hash ( state, ts ) ;
-    console.log( state ) ;
+                var data = results[0] ;
+                var rec_id = data._id ;
+                console.log( "fetched rec id: " + rec_id ) ;
+                var result = new Object() ;
+                hash = get_hash ( state, ts ) ;
+                console.log( state ) ;
 
-    var client = new Client();
-            var count = "";
-            client.get( machine,
-                function(data, response_raw){
-                    console.log(data);
-                    //for(var key in data) {
-                    //    console.log( "key:" + key + ", value:" + data[key] );
-                    //}
-                    jsdata = JSON.parse(data)
-                    for(var key in jsdata) {
-                        console.log( "key:" + key + ", value:" + jsdata[key] );
-                    }
-                    count = jsdata.CountGumballs
-                    console.log( "count = " + count ) ;
-                    var msg =   "\n\nMighty Gumball, Inc.\n\nNodeJS-Enabled Standing Gumball\nModel# " +
-                                jsdata.ModelNumber + "\n" +
-                                "Serial# " + jsdata.SerialNumber + "\n" +
-                                "\n" + state +"\n" ;
-                    if ( status ) {
-                        msg = msg + "\n" + status + "\n\n" ;
-                    }
-                    result.msg = msg ;
-                    result.ts = ts ;
-                    result.hash = hash ;
-                    result.state = state ;
+                console.log(data);
+                count = data.countGumballs
+                console.log( "count = " + count ) ;
+                var msg =   "\n\nMighty Gumball, Inc.\n\nNodeJS-Enabled Standing Gumball\nModel# " + 
+                            data.modelNumber + "\n" +
+                            "Serial# " + data.serialNumber + "\n" +
+                            "\n" + state +"\n\n" ;
+                result.msg = msg ;
+                result.ts = ts ;
+                result.hash = hash ;
+                result.state = state ;
 
-                    res.render('gumball', {
-                        state: result.state,
-                        ts: result.ts,
-                        hash: result.hash,
-                        message: result.msg
-                    });
-            });
+                res.render('gumball', {
+                    state: result.state,
+                    ts: result.ts,
+                    hash: result.hash,
+                    message: result.msg
+                });
+
+        } ) ;
+    } ) ;
+
+
 }
 
 
 var order = function( req, res, state, ts ) {
 
-    var client = new Client();
-            var count = 0;
-            client.post( endpoint,
-                function(data, response_raw) {
-                    jsdata = JSON.parse(data)
-                    for(var key in jsdata) {
-                        console.log( "key:" + key + ", value:" + jsdata[key] );
+  db.collection('gumball', function(err, collection) {
+
+        collection.find( {serialNumber: '1234998871109'}).toArray( function(err, results) {
+
+                var data = results[0] ;
+                var rec_id = data._id ;
+                console.log( "updating rec id: " + rec_id ) ;
+
+                count = data.countGumballs ;
+                if ( count > 0 ) {
+                        count-- ;
+                        collection.update({_id : rec_id}, {$set : {countGumballs : count}}, function( err, results) {
+                                console.log( "count after = " + count ) ;
+                                page( req, res, state, ts ) ;                        
+                            }
+                        ) ;
                     }
-                    id = jsdata.Id ;
-                    status = jsdata.OrderStatus ;
-                    console.log( "order id: " + id ) ;
-                    console.log( "order status: " + status ) ;
-                    status_msg = "order id: " + id + " order status: " + status ;
-                    page( req, res, state, ts, status_msg ) ;
-            });
+                    else {
+                        error( req, res, "*** OUT OF INVENTORY ***", ts ) ;
+                    }
+
+        } ) ;
+
+
+    } ) ;
+
 }
 
 
@@ -162,7 +229,7 @@ var handle_post = function (req, res, next) {
             page( req, res, "has-coin", ts ) ;
         else
             page( req, res, state, ts ) ;
-
+            
     }
     else if ( action == "Turn Crank" ) {
         if ( state == "has-coin" ) {
@@ -171,8 +238,8 @@ var handle_post = function (req, res, next) {
         }
         else
             page( req, res, state, ts ) ;
-    }
-
+    }  
+  
 }
 
 var handle_get = function (req, res, next) {
@@ -184,7 +251,7 @@ var handle_get = function (req, res, next) {
 }
 
 
-/*  Handlebars Test using Home template
+/*  Handlebars Test using Home template 
 
 app.get('/', function (req, res, next) {
     res.render('home', {
@@ -201,10 +268,22 @@ app.get('/', function (req, res, next) {
 app.get('/', handle_get ) ;
 app.post('/', handle_post ) ;
 
+db_init(function (err, results) {
+    if (err) {
+        console.error("FATAL ERROR INIT:");
+        console.error(err);
+        process.exit(-1);
+    } else {
+        //db.collections(function(err, collections) {
+        //    console.log(collections);
+        //});
+        app.set('port', (process.env.PORT || 8080));
+        app.listen(app.get('port'), function() {
+        console.log('Node app is running on port', app.get('port'));
+        });
+    }
+});
 
-console.log( "Server running on Port 8081..." ) ;
-
-app.listen(8081);
 
 
 /**
@@ -215,4 +294,52 @@ NodeJS-Enabled Standing Gumball
 Model# M102988
 Serial# 1234998871109
 
+-- MongoDB (Mongo Labs) Connection
+
+Host:   ds043220.mongolab.com
+Port:   43220
+Login:  user
+Passwd: pwd
+
+-- MongoDB (Localhost) Connection
+
+Host:   localhost
+Port:   27017
+
+-- Add Mongodb Admin User
+
+See:  https://docs.mongodb.com/manual/tutorial/enable-authentication/
+
+use admin
+db.addUser('cmpe281', 'cmpe281');
+
+use test
+db.runCommand( { createUser: "accountAdmin01",
+                 pwd: "cleartext password",
+                 roles: [
+                           { role: "clusterAdmin", db: "admin" },
+                           { role: "readWriteAnyDatabase", db: "admin" },
+                             "readWrite"
+                        ],
+                 writeConcern: { w: "majority" , wtimeout: 5000 }
+                } )
+                
+
+-- Gumball MongoDB Collection (Create Document)
+
+db.gumball.insert(
+{ 
+  id: 1,
+  countGumballs: 8,
+  modelNumber: 'M102988',
+  serialNumber: '1234998871109' 
+}
+) ;
+
+-- Gumball MongoDB Collection - Find Gumball Document
+
+db.gumball.find( { id: 1 } ) ;
+
 **/
+
+
