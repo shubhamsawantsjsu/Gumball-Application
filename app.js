@@ -55,11 +55,11 @@ var db_name = "db" ;
 */
 
 
-var db_host = "localhost" ;
-var db_port = "27017" ;
-var db_user = "cmpe281" ;
+var db_host = "ds131323.mlab.com" ;
+var db_port = "31323" ;
+var db_user = "admin" ;
 var db_pwd  = "cmpe281" ;
-var db_name = "test" ;
+var db_name = "test_v1" ;
 
    
 
